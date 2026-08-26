@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Grid Morph — rounded-cell silhouette</title>
+<style>
+  :root {
+    --bg: #14140f;
+    --panel: #1c1c17;
+    --line: #2e2e26;
+    --text: #e8e4d8;
+    --muted: #8d8a7c;
+    --accent: #d8ff5e;
+    --paper: #f7f2e7;
+    --ink: #131310;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 ui-sans-serif, -apple-system, "Segoe UI", Inter, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- panel ---------- */
+  aside {
+    width: 272px;
+    flex: none;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 18px 16px 40px;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+  }
+  h1 { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; margin: 0 0 2px; }
+  .sub { color: var(--muted); font-size: 11.5px; margin: 0 0 18px; }
+
+  fieldset { border: 0; border-top: 1px solid var(--line); margin: 0 0 14px; padding: 12px 0 0; }
+  legend { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding: 0 6px 0 0; }
+
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .row label { flex: 1; color: var(--muted); }
+  .row output { width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
+  input[type=range] { width: 108px; accent-color: var(--accent); }
+  input[type=number], input[type=text], select {
+    width: 100%; padding: 6px 8px; color: var(--text);
+    background: #121210; border: 1px solid var(--line); border-radius: 6px; font: inherit;
+  }
+  input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
+  .pair { display: flex; gap: 8px; margin-bottom: 9px; }
+  .pair > div { flex: 1; }
+  .pair span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+
+  button {
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: #232320; color: var(--text); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: #4a4a3d; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #16160f; font-weight: 600; }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 9px; }
+  .buttons .wide { grid-column: 1 / -1; }
+  .file {
+    display: block; padding: 14px 10px; margin-bottom: 9px; text-align: center; cursor: pointer;
+    border: 1px dashed var(--line); border-radius: 8px; color: var(--muted);
+  }
+  .file:hover { border-color: var(--accent); color: var(--text); }
+  .file input { display: none; }
+
+  /* ---------- stage ---------- */
+  main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; }
+  #stage { position: relative; width: 100%; height: 100%; border-radius: 10px; overflow: hidden; background: var(--paper); }
+  #stage.drop { outline: 2px solid var(--accent); outline-offset: -2px; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #grain { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; opacity: 0; transition: opacity .2s; }
+  #grain.on { opacity: .5; }
+  #hint {
+    position: absolute; left: 14px; bottom: 12px;
+    color: rgba(19,19,16,.42); font-size: 11.5px; letter-spacing: .04em;
+  }
+</style>
+</head>
+<body>
+
+<aside>
+  <h1>Grid Morph</h1>
+  <p class="sub">Rounded cells that resolve into a silhouette.</p>
+
+  <fieldset>
+    <legend>Source</legend>
+    <label class="file">
+      Drop or choose an SVG / PNG
+      <input id="file" type="file" accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp">
+    </label>
+    <div class="pair">
+      <div><span>Text instead</span><input id="text" type="text" value="A" maxlength="12"></div>
+    </div>
+    <div class="row"><label for="invert">Invert (light on dark art)</label><input id="invert" type="checkbox"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Grid</legend>
+    <div class="pair">
+      <div><span>Columns</span><input id="cols" type="number" value="40" min="4" max="200"></div>
+      <div><span>Rows</span><input id="rows" type="number" value="24" min="4" max="200"></div>
+    </div>
+    <div class="row"><label for="gap">Gap</label><input id="gap" type="range" min="0" max="0.5" step="0.01" value="0.12"><output id="gapV"></output></div>
+    <div class="row"><label for="round">Roundness</label><input id="round" type="range" min="0" max="0.5" step="0.01" value="0.3"><output id="roundV"></output></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Silhouette response</legend>
+    <div class="row"><label for="band">Edge band</label><input id="band" type="range" min="0.3" max="4" step="0.05" value="1.4"><output id="bandV"></output></div>
+    <div class="row"><label for="falloff">Size falloff</label><input id="falloff" type="range" min="0.2" max="3" step="0.05" value="0.8"><output id="falloffV"></output></div>
+    <div class="row"><label for="maxScale">Max size</label><input id="maxScale" type="range" min="0.4" max="1.4" step="0.02" value="1"><output id="maxScaleV"></output></div>
+    <div class="row"><label for="jitter">Wobble</label><input id="jitter" type="range" min="0" max="0.4" step="0.01" value="0.06"><output id="jitterV"></output></div>
+    <div class="row"><label for="stretch">Edge stretch</label><input id="stretch" type="range" min="0" max="0.6" step="0.02" value="0.2"><output id="stretchV"></output></div>
+    <div class="row"><label for="align">Align to edge</label><input id="align" type="checkbox" checked></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Motion</legend>
+    <div class="row"><label for="dur">Duration</label><input id="dur" type="range" min="200" max="3000" step="50" value="1300"><output id="durV"></output></div>
+    <div class="row"><label for="stagger">Stagger</label><input id="stagger" type="range" min="0" max="0.9" step="0.05" value="0.5"><output id="staggerV"></output></div>
+    <div class="pair">
+      <div><span>Stagger order</span>
+        <select id="order">
+          <option value="radial">Radial</option>
+          <option value="x">Left to right</option>
+          <option value="y">Top to bottom</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+    </div>
+    <div class="buttons">
+      <button id="morph" class="primary">Morph</button>
+      <button id="reset">Reset grid</button>
+      <button id="loop" class="wide">Loop: off</button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Output</legend>
+    <div class="row"><label for="grainOn">Paper grain</label><input id="grainOn" type="checkbox" checked></div>
+    <div class="buttons">
+      <button id="save">Save PNG</button>
+      <button id="saveSvg">Save SVG</button>
+    </div>
+  </fieldset>
+</aside>
+
+<main>
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <canvas id="grain" class="on"></canvas>
+    <div id="hint">Drop an SVG anywhere on the canvas</div>
+  </div>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+const $ = id => document.getElementById(id);
+const stage = $('stage'), canvas = $('c'), ctx = canvas.getContext('2d');
+const PAPER = '#f7f2e7', INK = '#131310';
+
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = t => t * t * (3 - 2 * t);
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+
+/* ---------------------------------------------------------------- state */
+
+let cells = [];          // {x,y,pitchX,pitchY, from:{}, to:{}, cur:{}, delay}
+let field = null;        // {sdf: Float32Array, w, h}  signed distance in field px, negative = inside
+let anim = null;         // {start, dir}
+let looping = false, loopTimer = 0;
+let dpr = 1;
+
+const P = () => ({
+  cols: clamp(+$('cols').value | 0, 4, 200),
+  rows: clamp(+$('rows').value | 0, 4, 200),
+  gap: +$('gap').value,
+  round: +$('round').value,
+  band: +$('band').value,
+  falloff: +$('falloff').value,
+  maxScale: +$('maxScale').value,
+  jitter: +$('jitter').value,
+  stretch: +$('stretch').value,
+  align: $('align').checked,
+  invert: $('invert').checked,
+  dur: +$('dur').value,
+  stagger: +$('stagger').value,
+  order: $('order').value
+});
+
+const PAD = 0.05;        // stage padding as a fraction of the short side
+function area() {
+  const w = canvas.width / dpr, h = canvas.height / dpr;
+  const pad = Math.min(w, h) * PAD;
+  return { x: pad, y: pad, w: w - pad * 2, h: h - pad * 2 };
+}
+
+/* ------------------------------------------------------------- noise */
+
+function hash2(x, y) {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+function valueNoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = smoothstep(x - xi), yf = smoothstep(y - yi);
+  return lerp(
+    lerp(hash2(xi, yi), hash2(xi + 1, yi), xf),
+    lerp(hash2(xi, yi + 1), hash2(xi + 1, yi + 1), xf),
+    yf
+  ) * 2 - 1;
+}
+
+/* --------------------------------------------------- distance transform */
+
+// Felzenszwalb & Huttenlocher exact squared-Euclidean distance transform.
+function edt1d(f, d, v, z, n) {
+  let k = 0;
+  v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) {
+      k--;
+      s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    }
+    k++; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++;
+    const dx = q - v[k];
+    d[q] = dx * dx + f[v[k]];
+  }
+}
+
+// mask: Uint8Array, 1 = seed. Returns Float32Array of distances to nearest seed.
+function distanceTo(mask, w, h) {
+  const INF = 1e12;
+  const g = new Float64Array(w * h);
+  for (let i = 0; i < mask.length; i++) g[i] = mask[i] ? 0 : INF;
+
+  const n = Math.max(w, h);
+  const f = new Float64Array(n), d = new Float64Array(n);
+  const v = new Int32Array(n), z = new Float64Array(n + 1);
+
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) f[y] = g[y * w + x];
+    edt1d(f, d, v, z, h);
+    for (let y = 0; y < h; y++) g[y * w + x] = d[y];
+  }
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) f[x] = g[row + x];
+    edt1d(f, d, v, z, w);
+    for (let x = 0; x < w; x++) g[row + x] = d[x];
+  }
+
+  const out = new Float32Array(w * h);
+  for (let i = 0; i < out.length; i++) out[i] = Math.sqrt(g[i]);
+  return out;
+}
+
+/* -------------------------------------------------------- field building */
+
+// Rasterise a black-on-white source, then turn it into a signed distance field.
+function fieldFromDraw(drawFn, resShort = 420) {
+  const a = area();
+  const aspect = a.w / a.h;
+  const w = Math.round(aspect >= 1 ? resShort * aspect : resShort);
+  const h = Math.round(aspect >= 1 ? resShort : resShort / aspect);
+
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const g = off.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#000';
+  drawFn(g, w, h);
+
+  const px = g.getImageData(0, 0, w, h).data;
+  const invert = P().invert;
+  const inside = new Uint8Array(w * h);
+  const outside = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < inside.length; i++, p += 4) {
+    const lum = (0.2126 * px[p] + 0.7152 * px[p + 1] + 0.0722 * px[p + 2]) / 255;
+    const ink = invert ? lum > 0.5 : lum < 0.5;
+    inside[i] = ink ? 1 : 0;
+    outside[i] = ink ? 0 : 1;
+  }
+
+  const dOut = distanceTo(inside, w, h);   // distance from anywhere to the ink
+  const dIn = distanceTo(outside, w, h);   // distance from anywhere to the background
+  const sdf = new Float32Array(w * h);
+  for (let i = 0; i < sdf.length; i++) sdf[i] = inside[i] ? -dIn[i] : dOut[i];
+
+  field = { sdf, w, h };
+}
+
+function sampleSDF(nx, ny) {
+  const { sdf, w, h } = field;
+  const x = clamp(nx * (w - 1), 0, w - 1);
+  const y = clamp(ny * (h - 1), 0, h - 1);
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
+  const fx = x - x0, fy = y - y0;
+  const a = sdf[y0 * w + x0], b = sdf[y0 * w + x1];
+  const c = sdf[y1 * w + x0], d = sdf[y1 * w + x1];
+  return lerp(lerp(a, b, fx), lerp(c, d, fx), fy);
+}
+
+/* ------------------------------------------------------------- sources */
+
+function drawText(str) {
+  return (g, w, h) => {
+    const box = { w: w * 0.86, h: h * 0.8 };
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    let size = h;
+    // Shrink until the string fits the box in both axes.
+    for (let i = 0; i < 40; i++) {
+      g.font = `900 ${size}px "Arial Black", Impact, system-ui, sans-serif`;
+      const m = g.measureText(str);
+      const tw = m.width;
+      const th = (m.actualBoundingBoxAscent || size * 0.7) + (m.actualBoundingBoxDescent || size * 0.2);
+      if (tw <= box.w && th <= box.h) break;
+      size *= Math.min(box.w / tw, box.h / th) * 0.98;
+    }
+    g.fillText(str, w / 2, h / 2);
+  };
+}
+
+function drawImage(img) {
+  return (g, w, h) => {
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    const pad = Math.min(w, h) * 0.08;
+    const s = Math.min((w - pad * 2) / iw, (h - pad * 2) / ih);
+    g.drawImage(img, (w - iw * s) / 2, (h - ih * s) / 2, iw * s, ih * s);
+  };
+}
+
+// SVGs are often exported without width/height, which makes them rasterise at 0px.
+function normaliseSVG(text) {
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+  const svg = doc.documentElement;
+  if (!svg || svg.nodeName.toLowerCase() !== 'svg') return null;
+  const vb = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+  if (!svg.getAttribute('width') && vb.length === 4) svg.setAttribute('width', vb[2]);
+  if (!svg.getAttribute('height') && vb.length === 4) svg.setAttribute('height', vb[3]);
+  if (!svg.getAttribute('width')) svg.setAttribute('width', 512);
+  if (!svg.getAttribute('height')) svg.setAttribute('height', 512);
+  return new XMLSerializer().serializeToString(svg);
+}
+
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = src;
+  });
+}
+
+let lastSource = null; // () => drawFn, re-run whenever the stage resizes
+
+async function useFile(file) {
+  if (!file) return;
+  const isSVG = file.type.includes('svg') || /\.svg$/i.test(file.name);
+  let url;
+  if (isSVG) {
+    const text = normaliseSVG(await file.text());
+    if (!text) return;
+    url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text);
+  } else {
+    url = URL.createObjectURL(file);
+  }
+  const img = await loadImage(url);
+  lastSource = () => drawImage(img);
+  $('hint').style.display = 'none';
+  rebuildField();
+  morph(1);
+}
+
+function useText() {
+  const str = $('text').value.trim() || 'A';
+  lastSource = () => drawText(str);
+  rebuildField();
+}
+
+/* --------------------------------------------------------------- cells */
+
+function buildCells() {
+  const p = P(), a = area();
+  const pitchX = a.w / p.cols, pitchY = a.h / p.rows;
+  const base = { s: 1, sn: 1, r: p.round, a: 0 };
+  cells = [];
+  for (let j = 0; j < p.rows; j++) {
+    for (let i = 0; i < p.cols; i++) {
+      const nx = p.cols > 1 ? i / (p.cols - 1) : 0.5;
+      const ny = p.rows > 1 ? j / (p.rows - 1) : 0.5;
+      cells.push({
+        i, j, nx, ny,
+        x: a.x + (i + 0.5) * pitchX,
+        y: a.y + (j + 0.5) * pitchY,
+        pitchX, pitchY,
+        rnd: hash2(i * 7.13 + 1, j * 3.71 + 1),
+        cur: { ...base },
+        from: { ...base },
+        to: { ...base },
+        delay: 0
+      });
+    }
+  }
+  assignDelays();
+}
+
+function assignDelays() {
+  const p = P();
+  for (const c of cells) {
+    let t;
+    if (p.order === 'x') t = c.nx;
+    else if (p.order === 'y') t = c.ny;
+    else if (p.order === 'random') t = c.rnd;
+    else t = Math.hypot(c.nx - 0.5, c.ny - 0.5) / 0.7071;
+    c.delay = clamp(t, 0, 1);
+  }
+}
+
+function gridTarget() {
+  const p = P();
+  for (const c of cells) {
+    c.to.s = 1; c.to.sn = 1; c.to.r = p.round; c.to.a = 0;
+  }
+}
+
+function shapeTarget() {
+  if (!field) return;
+  const p = P();
+  const a = area();
+  const pitch = Math.min(cells[0].pitchX, cells[0].pitchY);
+  const toCanvas = a.w / field.w;          // field px -> canvas px
+  const bandPx = Math.max(pitch * p.band, 1e-3);
+  const eps = 1 / field.w;
+
+  for (const c of cells) {
+    const d = sampleSDF(c.nx, c.ny) * toCanvas;
+    const dn = d / bandPx;                             // <0 inside, >0 outside
+
+    // Coverage: 1 deep inside, 0.5 on the outline, 0 well outside.
+    const u = smoothstep(clamp(0.5 - dn * 0.5, 0, 1));
+    const edge = clamp(1 - Math.abs(dn), 0, 1);        // 1 on the outline
+
+    let s = p.maxScale * Math.pow(u, p.falloff);
+    if (p.jitter) s *= 1 + p.jitter * valueNoise(c.i * 0.35, c.j * 0.35);
+    s = Math.max(0, s);
+
+    c.to.s = s;
+    c.to.sn = p.align ? 1 - p.stretch * edge * 0.6 : 1;      // squash across the edge
+    c.to.r = lerp(p.round, 0.5, edge);
+    if (p.align && s > 0.02 && edge > 0.01) {
+      const gx = sampleSDF(c.nx + eps, c.ny) - sampleSDF(c.nx - eps, c.ny);
+      const gy = sampleSDF(c.nx, c.ny + eps) - sampleSDF(c.nx, c.ny - eps);
+      c.to.a = Math.hypot(gx, gy) > 1e-9 ? (Math.atan2(gy, gx) + Math.PI / 2) * edge : 0;
+      c.to.s *= 1 + p.stretch * edge;                          // stretch along the edge
+    } else {
+      c.to.a = 0;
+    }
+  }
+}
+
+/* -------------------------------------------------------------- render */
+
+// arcTo keeps the corners circular and stays correct under rotation.
+function addRoundRect(path, cx, cy, w, h, r, ang) {
+  const hw = w / 2, hh = h / 2;
+  r = Math.min(r, hw, hh);
+  const cos = Math.cos(ang), sin = Math.sin(ang);
+  const pt = (x, y) => [cx + x * cos - y * sin, cy + x * sin + y * cos];
+  const c0 = pt(-hw, -hh), c1 = pt(hw, -hh), c2 = pt(hw, hh), c3 = pt(-hw, hh);
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const m01 = mid(c0, c1), m12 = mid(c1, c2), m23 = mid(c2, c3), m30 = mid(c3, c0);
+  path.moveTo(m01[0], m01[1]);
+  path.arcTo(c1[0], c1[1], m12[0], m12[1], r);
+  path.arcTo(c2[0], c2[1], m23[0], m23[1], r);
+  path.arcTo(c3[0], c3[1], m30[0], m30[1], r);
+  path.arcTo(c0[0], c0[1], m01[0], m01[1], r);
+  path.closePath();
+}
+
+function draw() {
+  const p = P();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+
+  const path = new Path2D();
+  for (const c of cells) {
+    const s = c.cur.s;
+    if (s <= 0.015) continue;
+    const cellW = c.pitchX * (1 - p.gap);
+    const cellH = c.pitchY * (1 - p.gap);
+    let w = cellW * s;
+    let h = cellH * s * c.cur.sn;
+    if (w < 0.4 || h < 0.4) continue;
+    const r = Math.min(w, h) * clamp(c.cur.r, 0, 0.5);
+    addRoundRect(path, c.x, c.y, w, h, r, c.cur.a);
+  }
+  ctx.fillStyle = INK;
+  ctx.fill(path);
+}
+
+/* ------------------------------------------------------------ animation */
+
+// dir 1 = grid -> shape, dir 0 = shape -> grid
+function morph(dir) {
+  if (dir === 1 && !field) return;
+  assignDelays();
+  for (const c of cells) c.from = { ...c.cur };
+  if (dir === 1) shapeTarget(); else gridTarget();
+  anim = { start: performance.now(), dir };
+  requestAnimationFrame(tick);
+}
+
+function tick(now) {
+  if (!anim) return;
+  const p = P();
+  const span = Math.max(p.dur * (1 - p.stagger), 1);
+  const elapsed = now - anim.start;
+  let done = true;
+
+  for (const c of cells) {
+    const t = easeOut(clamp((elapsed - c.delay * p.stagger * p.dur) / span, 0, 1));
+    if (t < 1) done = false;
+    c.cur.s = lerp(c.from.s, c.to.s, t);
+    c.cur.sn = lerp(c.from.sn, c.to.sn, t);
+    c.cur.r = lerp(c.from.r, c.to.r, t);
+    c.cur.a = lerp(c.from.a, c.to.a, t);
+  }
+  draw();
+
+  if (!done) {
+    requestAnimationFrame(tick);
+  } else {
+    const dir = anim.dir;
+    anim = null;
+    if (looping) {
+      clearTimeout(loopTimer);
+      loopTimer = setTimeout(() => { if (looping) morph(dir ? 0 : 1); }, 900);
+    }
+  }
+}
+
+/* -------------------------------------------------------- static redraw */
+
+function settleToCurrentTarget() {
+  // Applied while dragging sliders: keep whichever state is on screen, refreshed.
+  const showingShape = !!field && cells.length && cells.some(c => c.to.s !== 1);
+  if (showingShape) shapeTarget(); else gridTarget();
+  for (const c of cells) c.cur = { ...c.to };
+  draw();
+}
+
+/* ------------------------------------------------------------ grain */
+
+function paintGrain() {
+  const g = $('grain');
+  const w = g.clientWidth, h = g.clientHeight;
+  if (!w || !h) return;
+  g.width = w; g.height = h;
+  const gx = g.getContext('2d');
+  const img = gx.createImageData(w, h);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = 235 + Math.random() * 20;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = n;
+    img.data[i + 3] = 255;
+  }
+  gx.putImageData(img, 0, 0);
+}
+
+/* ------------------------------------------------------------- plumbing */
+
+function rebuildField() {
+  if (lastSource) fieldFromDraw(lastSource());
+}
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = stage.clientWidth, h = stage.clientHeight;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  rebuildField();
+  buildCells();
+  settleToCurrentTarget();
+  paintGrain();
+}
+
+const live = ['gap', 'round', 'band', 'falloff', 'maxScale', 'jitter', 'stretch'];
+const readouts = () => live.forEach(id => { const o = $(id + 'V'); if (o) o.value = (+$(id).value).toFixed(2); });
+
+live.forEach(id => $(id).addEventListener('input', () => { readouts(); settleToCurrentTarget(); }));
+$('durV').value = $('dur').value;
+$('dur').addEventListener('input', () => $('durV').value = $('dur').value);
+$('staggerV').value = (+$('stagger').value).toFixed(2);
+$('stagger').addEventListener('input', () => $('staggerV').value = (+$('stagger').value).toFixed(2));
+$('align').addEventListener('change', settleToCurrentTarget);
+$('order').addEventListener('change', assignDelays);
+
+['cols', 'rows'].forEach(id => $(id).addEventListener('input', () => { buildCells(); settleToCurrentTarget(); }));
+
+$('invert').addEventListener('change', () => { rebuildField(); settleToCurrentTarget(); });
+$('text').addEventListener('input', () => { useText(); settleToCurrentTarget(); });
+$('file').addEventListener('change', e => useFile(e.target.files[0]));
+
+$('morph').addEventListener('click', () => morph(1));
+$('reset').addEventListener('click', () => morph(0));
+$('loop').addEventListener('click', e => {
+  looping = !looping;
+  e.target.textContent = 'Loop: ' + (looping ? 'on' : 'off');
+  e.target.classList.toggle('primary', looping);
+  if (looping && !anim) morph(1);
+  if (!looping) clearTimeout(loopTimer);
+});
+
+$('grainOn').addEventListener('change', e => $('grain').classList.toggle('on', e.target.checked));
+
+function download(name, href) {
+  const a = document.createElement('a');
+  a.download = name;
+  a.href = href;
+  a.click();
+}
+
+$('save').addEventListener('click', () => {
+  const out = document.createElement('canvas');
+  out.width = canvas.width; out.height = canvas.height;
+  const g = out.getContext('2d');
+  g.fillStyle = PAPER; g.fillRect(0, 0, out.width, out.height);
+  g.drawImage(canvas, 0, 0);
+  download('grid-morph.png', out.toDataURL('image/png'));
+});
+
+function n(v) { return Number(v.toFixed(3)); }
+
+function exportSVG() {
+  const p = P();
+  const W = canvas.width / dpr, H = canvas.height / dpr;
+  const rects = [];
+  for (const c of cells) {
+    const s = c.cur.s;
+    if (s <= 0.015) continue;
+    const cellW = c.pitchX * (1 - p.gap);
+    const cellH = c.pitchY * (1 - p.gap);
+    const w = cellW * s;
+    const h = cellH * s * c.cur.sn;
+    if (w < 0.4 || h < 0.4) continue;
+    const r = Math.min(w, h) * clamp(c.cur.r, 0, 0.5);
+    const x = c.x - w / 2, y = c.y - h / 2;
+    const deg = c.cur.a * 180 / Math.PI;
+    const rot = Math.abs(deg) > 1e-4 ? ` transform="rotate(${n(deg)} ${n(c.x)} ${n(c.y)})"` : '';
+    const rad = r > 0.05 ? ` rx="${n(r)}" ry="${n(r)}"` : '';
+    rects.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}"${rad}${rot}/>`);
+  }
+  const svg = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${n(W)}" height="${n(H)}" viewBox="0 0 ${n(W)} ${n(H)}">`,
+    `<rect width="100%" height="100%" fill="${PAPER}"/>`,
+    `<g fill="${INK}">`,
+    ...rects,
+    '</g>',
+    '</svg>'
+  ].join('\n');
+  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  download('grid-morph.svg', url);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+$('saveSvg').addEventListener('click', exportSVG);
+
+['dragenter', 'dragover'].forEach(ev => stage.addEventListener(ev, e => {
+  e.preventDefault(); stage.classList.add('drop');
+}));
+['dragleave', 'drop'].forEach(ev => stage.addEventListener(ev, e => {
+  e.preventDefault(); stage.classList.remove('drop');
+}));
+stage.addEventListener('drop', e => useFile(e.dataTransfer.files[0]));
+
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(resize, 120);
+});
+
+readouts();
+useText();
+resize();
+setTimeout(() => morph(1), 350);
+
+})();
+</script>
+</body>
+</html>
